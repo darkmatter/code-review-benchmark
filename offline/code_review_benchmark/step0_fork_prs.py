@@ -33,9 +33,12 @@ import requests
 
 
 class GitHubPRForker:
-    def __init__(self, token: str, org: str):
+    keep_private: bool = False
+
+    def __init__(self, token: str, org: str, keep_private: bool = False):
         self.token = token
         self.org = org
+        self.keep_private = keep_private
         self.base_url = "https://api.github.com"
         self.headers = {
             "Authorization": f"token {token}",
@@ -214,9 +217,12 @@ class GitHubPRForker:
             if result.returncode != 0:
                 raise Exception(f"Push PR branch failed:\nstdout: {result.stdout}\nstderr: {result.stderr}")
 
-        # Make repo public now that all pushes are done
-        print("Making repository public...")
-        self.make_repo_public(new_repo_name)
+        # Make repo public now that all pushes are done (unless --keep-private)
+        if self.keep_private:
+            print("Keeping repository private.")
+        else:
+            print("Making repository public...")
+            self.make_repo_public(new_repo_name)
 
         # Create PR
         print("Creating PR...")
@@ -276,6 +282,9 @@ def main():
     parser.add_argument(
         "--token", default=os.environ.get("GITHUB_TOKEN"), help="GitHub token"
     )
+    parser.add_argument(
+        "--keep-private", action="store_true", help="Leave the created repos private instead of making them public"
+    )
     args = parser.parse_args()
 
     if not args.token:
@@ -287,7 +296,7 @@ def main():
         sys.exit(1)
 
     try:
-        forker = GitHubPRForker(args.token, args.org)
+        forker = GitHubPRForker(args.token, args.org, keep_private=args.keep_private)
 
         if args.file:
             urls = _load_pr_urls_from_file(args.file)

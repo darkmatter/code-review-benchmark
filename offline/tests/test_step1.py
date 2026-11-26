@@ -93,15 +93,39 @@ def test_fetch_repo_data(monkeypatch):
     def stub_review_comments(_org, _repo, _pr, tool=""):  # noqa: ARG001
         return [{"path": "file.py", "line": 5, "body": "content", "created_at": "now"}]
 
+    monkeypatch.setattr(step1, "latest_pr_number", lambda _org, _repo: 3)
     monkeypatch.setattr(step1, "fetch_pr_metadata", stub_pr_metadata)
     monkeypatch.setattr(step1, "fetch_review_comments", stub_review_comments)
 
     result = step1.fetch_repo_data("org", "repo",)
     assert result == {
         "repo_name": "repo",
-        "pr_meta": {"title": "PR 1", "url": "https://github.com/org/repo/pull/1"},
+        "pr_meta": {"title": "PR 3", "url": "https://github.com/org/repo/pull/1"},
         "comments": [{"path": "file.py", "line": 5, "body": "content", "created_at": "now"}],
     }
+
+
+@pytest.mark.parametrize("prs,expected", [([{"number": 4}], 4), ([], 1)])
+def test_latest_pr_number(monkeypatch, prs, expected):
+    monkeypatch.setattr(step1, "gh", lambda _args: prs)
+    assert step1.latest_pr_number("org", "repo") == expected
+
+
+def test_fetch_review_comments_tool_login(monkeypatch):
+    bot = {"login": "other-bot[bot]", "type": "Bot"}
+    ours = {"login": "darkmatteragent", "type": "User"}
+    responses = [
+        [
+            {"path": "a.py", "line": 1, "body": "ours", "created_at": "t", "user": ours},
+            {"path": "a.py", "line": 2, "body": "theirs", "created_at": "t", "user": bot},
+        ],
+        [],
+        [],
+    ]
+    monkeypatch.setattr(step1, "gh", lambda _args: responses.pop(0))
+
+    comments = step1.fetch_review_comments("org", "repo", 1, tool="darkmatter")
+    assert [c["body"] for c in comments] == ["ours"]
 
 
 def test_load_dotenv(tmp_path, monkeypatch):

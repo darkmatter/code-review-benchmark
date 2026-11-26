@@ -110,6 +110,10 @@ def _is_bot(user: dict | None) -> bool:
 # For these, bot filtering is skipped and all human comments are collected.
 _NON_BOT_TOOLS: frozenset[str] = frozenset({"claude"})
 
+# Tools that post as one known account. For these only that account's comments
+# are collected, so other review bots installed on the org don't count as the tool's.
+_TOOL_LOGINS: dict[str, str] = {"darkmatter": "darkmatteragent"}
+
 
 def fetch_review_comments(org: str, repo: str, pr: int, tool: str = "") -> list[dict]:
     """Fetch review comments from a PR.
@@ -120,9 +124,12 @@ def fetch_review_comments(org: str, repo: str, pr: int, tool: str = "") -> list[
     all human comments are collected as-is.
     """
     require_bot = tool not in _NON_BOT_TOOLS
+    tool_login = _TOOL_LOGINS.get(tool)
     comments = []
 
     def _include(user: dict | None) -> bool:
+        if tool_login:
+            return (user or {}).get("login") == tool_login
         return _is_bot(user) if require_bot else True
 
     # Fetch PR review comments (inline code comments)
@@ -186,10 +193,25 @@ def fetch_pr_metadata(org: str, repo: str, pr: int) -> dict:
         return {"title": None, "url": None}
 
 
+def latest_pr_number(org: str, repo: str) -> int:
+    """Return the newest PR's number.
+
+    A benchmark repo starts with PR #1. Re-running a review (rerun_reviews)
+    closes it and opens the next one from the same branches, so the newest PR
+    holds the latest review.
+    """
+    try:
+        prs = gh(["api", f"/repos/{org}/{repo}/pulls?state=all&per_page=1"])
+    except subprocess.CalledProcessError:
+        return 1
+    return prs[0]["number"] if prs else 1
+
+
 def fetch_repo_data(org: str, repo_name: str, tool: str = "") -> dict:
-    """Fetch both PR metadata and comments for a repo. Returns combined result."""
-    pr_meta = fetch_pr_metadata(org, repo_name, 1)
-    comments = fetch_review_comments(org, repo_name, 1, tool=tool)
+    """Fetch both PR metadata and comments for a repo's newest PR. Returns combined result."""
+    pr = latest_pr_number(org, repo_name)
+    pr_meta = fetch_pr_metadata(org, repo_name, pr)
+    comments = fetch_review_comments(org, repo_name, pr, tool=tool)
     return {
         "repo_name": repo_name,
         "pr_meta": pr_meta,
@@ -207,7 +229,9 @@ def main():
     parser.add_argument("--test", action="store_true", help="Test mode: process 1 repo per tool")
     parser.add_argument("--tool", help="Only process specific tool")
     parser.add_argument("--force", action="store_true", help="Force refetch (all tools, or specific with --tool)")
+    parser.add_argument("--repos", help="Comma-separated benchmark repo names; only these are fetched")
     args = parser.parse_args()
+    wanted_repos = {r.strip() for r in args.repos.split(",") if r.strip()} if args.repos else None
 
     # Load existing output for incremental processing
     output_path = Path(args.output)
@@ -238,6 +262,9 @@ def main():
         parsed = parse_repo_name(repo_name)
 
         if not parsed:
+            continue
+
+        if wanted_repos is not None and repo_name not in wanted_repos:
             continue
 
         tool = parsed["tool"]
