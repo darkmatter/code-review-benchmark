@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Re-run a tool's review on benchmark repos that already exist, without re-forking.
 
-For each selected benchmark repo, the newest PR is closed and a new PR is
-opened from the same branches. A reviewer that starts on newly opened PRs, and
-reviews each PR once, then reviews the new PR from scratch. The script waits
+For each selected benchmark repo, the benchmark PR (the newest PR from its
+``pr-<number>`` branch) is closed and a new PR is opened from the same
+branches. A reviewer that starts on newly opened PRs, and reviews each PR once,
+then reviews the new PR from scratch. The script waits
 until the tool's account has reviewed every new PR, then writes the reviewed
 repo names so step1 can fetch just those (``--repos``).
 
 PRs are re-opened in batches (``--batch-size``), each batch after the previous
-one is reviewed: all 50 at once drained the reviewer account's GitHub API quota.
+one is reviewed: all 50 at once coincided with the reviewer account's GitHub API
+quota running out.
 
 Usage:
     # Every benchmark repo the tool has in the org
@@ -34,6 +36,7 @@ import sys
 import time
 
 from code_review_benchmark.step1_download_prs import _TOOL_LOGINS
+from code_review_benchmark.step1_download_prs import benchmark_pr
 from code_review_benchmark.step1_download_prs import gh
 from code_review_benchmark.step1_download_prs import load_golden_comments
 from code_review_benchmark.step1_download_prs import parse_repo_name
@@ -122,11 +125,10 @@ def gh_send(method: str, endpoint: str, payload: dict) -> dict:
 
 
 def reopen(org: str, repo: str) -> int:
-    """Close the repo's newest PR and open a new one from the same branches. Returns its number."""
-    prs = gh(["api", f"/repos/{org}/{repo}/pulls?state=all&per_page=1"])
-    if not prs:
-        raise RuntimeError(f"{org}/{repo} has no pull request to re-open")
-    old = prs[0]
+    """Close the repo's benchmark PR and open a new one from the same branches. Returns its number."""
+    old = benchmark_pr(org, repo)
+    if old is None:
+        raise RuntimeError(f"{org}/{repo} has no benchmark pull request to re-open")
     if old["state"] == "open":
         gh_send("PATCH", f"/repos/{org}/{repo}/pulls/{old['number']}", {"state": "closed"})
     new = gh_send(

@@ -107,8 +107,21 @@ def test_fetch_repo_data(monkeypatch):
 
 @pytest.mark.parametrize("prs,expected", [([{"number": 4}], 4), ([], 1)])
 def test_latest_pr_number(monkeypatch, prs, expected):
-    monkeypatch.setattr(step1, "gh", lambda _args: prs)
-    assert step1.latest_pr_number("org", "repo") == expected
+    calls = []
+
+    def fake_gh(args):
+        calls.append(args)
+        return prs
+
+    monkeypatch.setattr(step1, "gh", fake_gh)
+    assert step1.latest_pr_number("org", "kc__keycloak__darkmatter__PR37429__20261126") == expected
+    # Only the benchmark branch counts, not bot PRs from other branches.
+    assert "head=org:pr-37429" in calls[0][1]
+
+
+def test_latest_pr_number_unknown_repo(monkeypatch):
+    monkeypatch.setattr(step1, "gh", lambda _args: pytest.fail("no lookup for a non-benchmark repo"))
+    assert step1.latest_pr_number("org", "docs") == 1
 
 
 def test_fetch_review_comments_tool_login(monkeypatch):

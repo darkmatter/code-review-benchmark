@@ -193,18 +193,29 @@ def fetch_pr_metadata(org: str, repo: str, pr: int) -> dict:
         return {"title": None, "url": None}
 
 
-def latest_pr_number(org: str, repo: str) -> int:
-    """Return the newest PR's number.
+def benchmark_pr(org: str, repo: str) -> dict | None:
+    """Return the newest PR from the repo's benchmark branch, or None.
 
-    A benchmark repo starts with PR #1. Re-running a review (rerun_reviews)
-    closes it and opens the next one from the same branches, so the newest PR
-    holds the latest review.
+    step0 opens the benchmark PR from ``pr-<number>``. Re-running a review
+    (rerun_reviews) closes it and opens the next one from the same branch, so
+    the newest PR from that branch holds the latest review. PRs from other
+    branches, such as Dependabot's, are ignored.
     """
+    parsed = parse_repo_name(repo)
+    if not parsed:
+        return None
+    head = f"{org}:pr-{parsed['pr_number']}"
     try:
-        prs = gh(["api", f"/repos/{org}/{repo}/pulls?state=all&per_page=1"])
+        prs = gh(["api", f"/repos/{org}/{repo}/pulls?state=all&head={head}&per_page=1"])
     except subprocess.CalledProcessError:
-        return 1
-    return prs[0]["number"] if prs else 1
+        return None
+    return prs[0] if prs else None
+
+
+def latest_pr_number(org: str, repo: str) -> int:
+    """Return the number of the repo's newest benchmark PR (1 if none is found)."""
+    pr = benchmark_pr(org, repo)
+    return pr["number"] if pr else 1
 
 
 def fetch_repo_data(org: str, repo_name: str, tool: str = "") -> dict:
